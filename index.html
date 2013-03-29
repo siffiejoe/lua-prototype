@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="content-type" content="text/html; charset=utf-8" /><title>prototype -- Prototype Based OO Programming For Lua</title><link rel="stylesheet" type="text/css" href="default.css" /><link rel="stylesheet" type="text/css" href="highlight.css" /><script type="text/javascript" src="highlight.pack.js"></script><script type="text/javascript">
+      hljs.initHighlightingOnLoad();
+    </script></head><body>
+
+<p><img src="prototype.png" alt="prototype" /></p>
+
+<h1>prototype -- Prototype Based OO Programming For Lua</h1><div class="toc"><a href="#Introduction" title="Introduction">Introduction</a> · <a href="#Basic_Usage" title="Basic Usage">Basic Usage</a> · <a href="#Reference" title="Reference">Reference</a> · <a href="#Download" title="Download">Download</a> · <a href="#Installation" title="Installation">Installation</a> · <a href="#Contact" title="Contact">Contact</a> · <a href="#License" title="License">License</a></div>
+
+<h2><a name="Introduction" id="Introduction"></a>Introduction</h2>
+
+<p>There are basically two ways of doing object oriented programming:
+class-based and prototype-based. While class-based OO is certainly
+easier to implement for compiler-writers and therefore much more
+familiar for most programmers (thanks to C++, Java, et al.),
+prototype-based OO is actually easier (half the number of concepts and
+less special cases) and fits nicely to dynamic interpreted languages
+like Lua. <a href="http://lua-users.org/wiki/InheritanceTutorial">This wikipage</a> briefly handles prototype-based OO, but
+fails to address the biggest problem: How to clone objects ...</p>
+
+
+
+<h2><a name="Basic_Usage" id="Basic_Usage"></a>Basic Usage</h2>
+
+<p>The <code>prototype</code> module can create root objects for prototype-based OO
+hierarchies:</p>
+
+<pre><code>$ cat &gt; test.lua
+local prototype = require( "prototype" )
+local object = prototype{
+  default = prototype.assignment_copy,
+}
+local person = object:clone()
+person.name = "anonymous"
+function person:say()
+  print( "Hi, I'm " .. self.name )
+end
+person:say()
+local alice = person:clone()
+alice.name = "Alice"
+alice:say()
+^D
+</code></pre>
+
+<p>The output is (as expected):</p>
+<pre><code class="no-highlight">$ lua test.lua
+Hi, I'm anonymous
+Hi, I'm Alice
+</code></pre>
+
+
+<h2><a name="Reference" id="Reference"></a>Reference</h2>
+
+<p>The <code>prototype</code> module is a <a href="http://lua-users.org/wiki/FuncTables">functable</a> which serves as a generator
+for custom tailored prototype root objects and as a container for some
+predefined cloning policies. You call the <code>prototype</code> module passing
+a configuration table as argument, which configures the default and
+per-type cloning policies. The configuration table can have the
+following fields:</p>
+
+<ul><li><p><code>default = &lt;function&gt;</code></p>
+    
+    <p>This specifies the default cloning policy for all fields (called
+    slots in prototype terminology) when no per-slot or per-type
+    cloning policies apply.</p></li>
+    <li><p><code>boolean = &lt;function&gt;</code></p></li>
+    <li><p><code>number = &lt;function&gt;</code></p></li>
+    <li><p><code>string = &lt;function&gt;</code></p></li>
+    <li><p><code>table = &lt;function&gt;</code></p></li>
+    <li><p><code>["function"] = &lt;function&gt;</code></p></li>
+    <li><p><code>userdata = &lt;function&gt;</code></p></li>
+    <li><p><code>thread = &lt;function&gt;</code></p>
+    
+    <p>You can specify a per-type cloning policy which is used in case a
+    matching per-slot cloning policy is not available.</p></li>
+    <li><p><code>use_prototype_delegation = &lt;boolean&gt;</code></p>
+    
+    <p>A flag which specifies if delegation via __index metamethods
+    should be used for the prototype objects to lookup non-existing
+    slots in parent objects. If you use delegation there is no way
+    of actually deleting slots if they are in parent objects, and
+    modifications on parent objects might affect child objects that
+    didn't redefine the inherited slots.</p></li>
+    <li><p><code>use_slot_protection = &lt;boolean&gt;</code></p>
+    
+    <p>Setting this flag to <code>true</code> sets a __newindex handler on the
+    prototype objects that forbids creating new slots without
+    declaring them first using the <code>slot</code>-method (see below). This
+    forces per-slot cloning policies for all slots.</p></li>
+    <li><p><code>use_extra_meta = &lt;boolean&gt;</code></p>
+    
+    <p>Using this flag you can specify if a prototype object should act
+    as its own metatable or allocate an extra table for this. Reusing
+    the object's table saves some memory if delegation is used but you
+    get those strange __index and/or __newindex slots in your
+    prototype objects, and metatables are cached anyway. This flag has
+    no effect if the prototype objects don't need a metatable.</p></li>
+    <li><p><code>use_clone_delegation = &lt;boolean&gt;</code></p>
+    
+    <p>The <code>clone</code> functable (see below) serves as a container for all
+    per-slot cloning policies. Using this flag you can specify if
+    the clone functables should use delegation itself instead of
+    copying all per-slot cloning policies from parent objects. This
+    might save some memory if you have lots of per-slot policies
+    (e.g. if you <code>use_slot_protection = true</code>)</p></li>
+</ul><p>Calling the <code>prototype</code> module returns a root object, which provides
+the following three methods:</p>
+
+<ul><li><p><code>object:clone() -&gt; newobject</code></p>
+    
+    <p>This method creates a new object that inherits all currently
+    existing slots from the original object. How this inheritance is
+    done depends on the cloning policies. The <code>clone</code>-method (which
+    is in fact a <a href="http://lua-users.org/wiki/FuncTables">functable</a>) also holds the per-slot cloning
+    policies.</p></li>
+    <li><p><code>object:mixin( cloneable, ... ) -&gt; self</code></p>
+    
+    <p>This method puts the <code>cloneable</code> object in a private slot and for
+    each name given as extra argument sets up a forwarding method in
+    <code>object</code>, that calls a method with the same name on the
+    <code>cloneable</code> object.</p>
+    
+    <p><code>cloneable</code> may be either a (full) userdata or a table, and must
+    provide a clone-method. Prototype objects by default fulfill this
+    requirement (obviously).</p></li>
+    <li><p><code>object:slot( key [, policy] ) -&gt; self</code></p>
+    
+    <p>This method can be used to set the cloning policy (see below) of a
+    slot. If <code>policy</code> is missing, <code>assignment_copy</code> is used. Slots
+    without per-slot cloning policy use the per-type or default
+    cloning policies.</p>
+    
+    <p>Using the <code>use_slot_protection = true</code> flag forces you to
+    explicitly set a per-slot cloning policy beforehand for all slots.</p></li>
+</ul><h3>Cloning Policies</h3>
+
+<p>Cloning is easy for value types like numbers and booleans, and for
+constant reference types like strings. But non-constant reference
+types like tables or even userdata are more of a problem. E.g. for an
+array or a map-like data structure you typically want the table itself
+copied (not just the reference put into the cloned object), but the
+keys and values should refer to the old values, so that you can add or
+remove elements from those data structures without affecting the
+parent object but lookup the original values. For graph-like data
+structures you want a deep copy which also handles cycles, etc. And
+all bets are off for userdata or objects with metatables.</p>
+
+<p>This module allows you to specify default, per-type, and per-slot
+cloning policies to handle all cloning needs for your data. You can
+define your own cloning policies (functions taking one argument and
+returning its copy) or use one of the predefined functions in the
+<code>prototype</code> module:</p>
+
+<ul><li><p><code>prototype.no_copy</code></p>
+    
+    <p>No copy is made, nil is assigned to the slot. Therefore, if the
+    prototype implementation uses delegation, the slot is looked up in
+    the parent object, otherwise the slot is no longer available.</p></li>
+    <li><p><code>prototype.assignment_copy</code></p>
+    
+    <p>The given value/reference is assigned to the new slot in the
+    cloned object.</p></li>
+    <li><p><code>prototype.shallow_copy</code></p>
+    
+    <p>This policy only works for tables. The table itself is copied, but
+    its keys and values are assigned. This is usually what you want
+    for most arrays, maps and sets.</p></li>
+    <li><p><code>prototype.delegate_copy</code></p>
+    
+    <p>This policy only works for tables. Returns a new table with a
+    metatable and an __index metamethod set to the original table.</p></li>
+    <li><p><code>prototype.deep_copy</code></p>
+    
+    <p>Only works for tables and creates a deep copy of the table and all
+    its referenced subtables. Also handles cycles.</p></li>
+    <li><p><code>prototype.clone_copy</code></p>
+    
+    <p>Only works for (full) userdata and tables. Calls the
+    <code>obj:clone()</code>-method for the value and assigns the result to the
+    slot.</p></li>
+</ul><h3>Examples</h3>
+
+<p>Use delegation for almost everything (and shallow copy for tables):</p>
+
+<pre><code>local object = prototype{
+  default = prototype.no_copy,
+  table = prototype.shallow_copy,
+  use_prototype_delegation = true,
+}
+</code></pre>
+
+<p>Use assignment copy (and shallow copy for tables), no delegation or
+index lookup:</p>
+
+<pre><code>local object = prototype{
+  default = prototype.assignment_copy,
+  table = prototype.shallow_copy,
+}
+</code></pre>
+
+<p>Explicitly declare all slots, protect objects from undeclared slots,
+use no default cloning policy:</p>
+
+<pre><code>local object = prototype{
+  -- should never happen:
+  default = function() error( "Argh, unknown slot!" ) end,
+  use_prototype_delegation = true,
+  use_slot_protection = true,
+  use_clone_delegation = true,
+}
+object:slot( "val", prototype.assignment_copy )
+object.val = 1
+</code></pre>
+
+<p>Use assignment for value data, delegation for references, and shallow
+copy for tables (and don't put __index or __newindex in the objects):</p>
+
+<pre><code>local object = prototype{
+  default = prototype.no_copy,
+  boolean = prototype.assignment_copy,
+  number = prototype.assignment_copy,
+  string = prototype.assignment_copy,
+  table = prototype.shallow_copy,
+  use_prototype_delegation = true,
+  use_extra_meta = true,
+}
+</code></pre>
+
+
+<h3>Adding Mixins to Prototypes</h3>
+
+<p>There are cases where the desired functionality can only be
+implemented using external C modules or where preexisting Lua objects
+are available that should be integrated into the prototype hierarchy.</p>
+
+<p>The good news is that the <code>mixin</code>-method can add delegation methods to
+a prototype object which call the external C or Lua object. The
+downside is that these external C or Lua objects must be cloneable
+(i.e. they must provide a <code>clone</code>-method that returns a copy of its
+single argument). Prototype objects provide such a method, so you can
+use prototype objects as mixins in other prototype objects.</p>
+
+<p>Basic usage (but probably using the C API) is:</p>
+
+<pre><code>$ cat &gt; test.lua
+local u = newproxy( true )
+local mt = getmetatable( u )
+mt.__index = {
+  peek = function( self )
+    print( "peeking:", self )
+  end,
+  clone = function( self )
+    print( "cloning:", self )
+    return newproxy( self )
+  end
+}
+local prototype = require( "prototype" )
+local object = prototype{
+  default = prototype.no_copy,
+  use_prototype_delegation = true,
+}
+object:mixin( u, "peek" )
+local cloned = object:clone()
+cloned:peek()
+^D
+</code></pre>
+
+<p>The result is:</p>
+
+<pre><code class="no-highlight">$ lua test.lua
+cloning:        userdata: 0x8052a4c
+peeking:        userdata: 0x805418c
+</code></pre>
+
+<p>(<code>newproxy</code> is an undocumented function included in Lua up to version
+5.1, that creates a zero-size userdata.)</p>
+
+
+<h2><a name="Download" id="Download"></a>Download</h2>
+
+<p>The source code (with documentation and test scripts) is available on
+<a href="https://github.com/siffiejoe/lua-prototype/">github</a>.</p>
+
+
+
+<h2><a name="Installation" id="Installation"></a>Installation</h2>
+
+<p>There are two ways to install this module, either using luarocks (if
+this module already ended up in the <a href="http://luarocks.org/repositories/rocks/" title="Main Repository">main luarocks repository</a>) or
+manually.</p>
+
+<p>Using luarocks, simply type:</p>
+
+<pre><code>luarocks install prototype
+</code></pre>
+
+<p>To install the module manually just drop <code>prototype.lua</code> somewhere
+into your Lua <code>package.path</code>.</p>
+
+
+
+<h2><a name="Contact" id="Contact"></a>Contact</h2>
+
+<p>Philipp Janda, siffiejoe(a)gmx.net</p>
+
+<p>Comments and feedback are always welcome.</p>
+
+
+<h2><a name="License" id="License"></a>License</h2>
+
+<p>prototype is <em>copyrighted free software</em> distributed under the MIT
+license (the same license as Lua 5.1). The full license text follows:</p>
+
+<pre><code class="no-highlight">prototype (c) 2013 Philipp Janda
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+</code></pre>
+
+
+
+</body></html>
