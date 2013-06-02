@@ -6,6 +6,10 @@ local newproxy = newproxy or require( "newproxy" ) -- for Lua5.2
 
 local bar = string.rep( "=", 70 )
 
+local function check( ok, ... )
+  local oks = ok and "[ ok ]" or "[FAIL]"
+  print( oks, ... )
+end
 
 local function test_prototype( conf, call_slots )
   print( bar )
@@ -19,7 +23,7 @@ local function test_prototype( conf, call_slots )
     local mt = getmetatable( u )
     mt.__index = {
       peek = function( self )
-        print( "peeking:", self )
+        return tostring( self )
       end,
       clone = function( self )
         return newproxy( self )
@@ -44,25 +48,24 @@ local function test_prototype( conf, call_slots )
   copy.number = 2
   copy.table[ 1 ] = 1000
   copy.array[ 1 ] = 1000
-  print( "myobject.number =", myobject.number, "(should be 1)" )
-  print( "copy.number =", copy.number, "(should be 2)" )
-  print( "copy.string =", copy.string, "(should be 'hello')" )
+  check( myobject.number == 1, "myobject.number =", myobject.number )
+  check( copy.number == 2, "copy.number =", copy.number )
+  check( copy.string == "hello", "copy.string =", copy.string )
   print( "myobject.table =", myobject.table )
-  print( "myobject.table[ 1 ] =", myobject.table[ 1 ], "(should be 1)" )
-  print( "copy.table =", copy.table, "(should be different from myobject.table)" )
-  print( "copy.table[ 1 ] =", copy.table[ 1 ], "(should be 1000)" )
-  print( "copy.table.self =", copy.table.self, "(should be equal to copy.table)" )
+  check( myobject.table[ 1 ] == 1, "myobject.table[ 1 ] =", myobject.table[ 1 ] )
+  check( copy.table ~= myobject.table, "copy.table =", copy.table )
+  check( copy.table[ 1 ] == 1000, "copy.table[ 1 ] =", copy.table[ 1 ] )
+  check( copy.table.self == copy.table, "copy.table.self =", copy.table.self )
   print( "myobject.array =", myobject.array )
-  print( "myobject.array[ 1 ] =", myobject.array[ 1 ], "(should be 1)" )
-  print( "copy.array =", copy.array, "(should be different from myobject.array)" )
-  print( "copy.array[ 1 ] =", copy.array[ 1 ], "(should be 1000)" )
-  myobject:peek()
-  copy:peek()
-  print( "those two peeks should have different addresses!" )
+  check( myobject.array[ 1 ] == 1, "myobject.array[ 1 ] =", myobject.array[ 1 ] )
+  check( copy.array ~= myobject.array, "copy.array =", copy.array )
+  check( copy.array[ 1 ] == 1000, "copy.array[ 1 ] =", copy.array[ 1 ] )
+  local mop, cp = myobject:peek(), copy:peek()
+  check( mop ~= cp, "myobject:peek(), copy:peek() =", mop, cp )
   myobject.string = "hi"
-  print( "copy.string =", copy.string, "(should be 'hello' or 'hi' depending on implementation)" )
+  check( copy.string == "hello" or copy.string == "hi", "copy.string =", copy.string )
   copy.number = nil
-  print( "copy.number =", copy.number, "(should be `nil' or `1' depending on implementation)" )
+  check( copy.number == nil or copy.number == 1, "copy.number =", copy.number )
 end
 
 
@@ -82,7 +85,6 @@ test_prototype{
 -- explicitly declare all slots, protect objects from
 -- undeclared slots, no default cloning policy
 test_prototype( {
-  default = function() error( "unknown slot" ) end,
   use_prototype_delegation = true,
   use_slot_protection = true,
   use_clone_delegation = true,

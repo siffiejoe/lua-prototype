@@ -214,8 +214,6 @@ Explicitly declare all slots, protect objects from undeclared slots,
 use no default cloning policy:
 
     local object = prototype{
-      -- should never happen:
-      default = function() error( "Argh, unknown slot!" ) end,
       use_prototype_delegation = true,
       use_slot_protection = true,
       use_clone_delegation = true,

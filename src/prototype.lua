@@ -7,11 +7,10 @@ local type = assert( type )
 local pairs = assert( pairs )
 local select = assert( select )
 local rawset = assert( rawset )
-local error = assert( error )
 local setmetatable = assert( setmetatable )
 local loadstring = assert( loadstring or load )
 local string = require( "string" )
-local sfmt = assert( string.format )
+local s_fmt = assert( string.format )
 
 -- module table
 local prototype = {}
@@ -75,6 +74,16 @@ end
 ----------------------------------------------------------------------
 -- create a custom prototype object according to the specification
 
+
+-- function used as __newindex for protecting undeclared slots
+local function protect_slots( t, k, v )
+  assert( t.clone[ k ], "undeclared slot on prototype object" )
+  if t.clone[ k ] then
+    rawset( t, k, v )
+  end
+end
+
+
 -- generic implementation for a prototype's slot method
 local function slot( self, key, handler )
   self.clone[ key ] = handler or prototype.assignment_copy
@@ -107,58 +116,27 @@ end
 
 
 local template = [[
-local spec, protect, default, type, pairs, setmetatable = ...
-local cache = {}
-setmetatable( cache, { __mode = "kv" } )
-local shared_meta = {
-  __newindex = protect
-}
-local function clone_func( t, o )
+local spec, protect, type, pairs, setmetatable = ...
+local cache = setmetatable( {}, { __mode = "kv" } )
+local shared_meta = { __newindex = protect }
+local function clone_ft_call( ft, o )
   local new_o = {}
-  for key,val in pairs( o ) do
-    local new_val, handler = nil, t[ key ]%s
-    if handler then
-      new_val = handler( val )
-%s    end
-    new_o[ key ] = new_val
+  for k,v in pairs( o ) do
+    new_o[ k ] = (ft[ k ] or spec[ type( v ) ])( v )
   end
 %s  return new_o
 end
-local clone_table_meta = { __call = clone_func }
-local function clone_clone_table( ct )
+local clone_ft_meta = { __call = clone_ft_call }
+local function clone_ft_cloner( ct )
   local new_ct = {}
 %s
   return new_ct
 end
-local clone = {
-  clone = clone_clone_table
+local clone_ft = {
+  clone = clone_ft_cloner
 }
-setmetatable( clone, clone_table_meta )
-return clone]]
-
-
--- function used as __newindex for protecting undeclared slots
-local function protect_slots( t, k, v )
-  if t.clone[ k ] then
-    rawset( t, k, v )
-  else
-    error( "undeclared slot on prototype object", 2 )
-  end
-end
-
-
-local function compile( spec, h_init,  h_fallback, o_init, c_body )
-  local code = sfmt( template, h_init, h_fallback, o_init, c_body )
-  return assert( loadstring( code ) )(
-    spec, protect_slots, spec.default, type, pairs, setmetatable
-  )
-end
-
-
-local function has_per_type_handler( t )
-  return t.boolean or t.number or t.string or t.table or
-         t.userdata or t.thread or t[ "function" ]
-end
+setmetatable( clone_ft, clone_ft_meta )
+return clone_ft]]
 
 
 local function setup_meta( spec )
@@ -199,74 +177,63 @@ end
 
 local function setup_c_body( spec )
   if spec.use_clone_delegation then
-    return [[  local meta = { __call = clone_func, __index = ct }
+    return [[  local meta = { __call = clone_ft_call, __index = ct }
   setmetatable( new_ct, meta )]]
   else
     return [[  for k,v in pairs( ct ) do new_ct[ k ] = v end
-  setmetatable( new_ct, clone_table_meta )]]
+  setmetatable( new_ct, clone_ft_meta )]]
   end
 end
 
 
 -- creates custom code for a clone functable
 local function make_clone( spec )
-  local h_init, h_fallback = "", ""
-  if has_per_type_handler( spec ) then
-    h_init = " or spec[ type( val ) ]"
-  end
-  if spec.default then
-    h_fallback = "    else\n      new_val = default( val )\n"
-  end
   local o_init = setup_meta( spec ) ..
                  setup_delegation( spec ) ..
                  setup_protection( spec )
   local c_body = setup_c_body( spec )
-  return compile( spec, h_init, h_fallback, o_init, c_body )
+  local code = s_fmt( template, o_init, c_body )
+  return assert( loadstring( code ) )(
+    spec, protect_slots, type, pairs, setmetatable
+  )
 end
 
 
-local function default_policies( spec )
-  local p = prototype.assignment_copy
-  if spec.use_prototype_delegation then
-    p = prototype.no_copy
+local types = {
+  "nil", "boolean", "number", "string",
+  "table", "userdata", "function", "thread"
+}
+
+local function make_prototype( _, spec )
+  assert( type( spec ) == "table", "invalid prototype specification" )
+  for i = 1, #types do
+    local t = types[ i ]
+    if type( spec[ t ] ) ~= "function" then
+      spec[ t ] = spec.default
+    end
   end
-  return p, spec.use_slot_protection and p or nil
-end
-
-
-local function declare_builtin_slots( spec, root, f_policy )
+  local f_policy = spec.use_slot_protection and
+                   (spec[ "function" ] or
+                    (spec.use_prototype_delegation and
+                     prototype.no_copy or prototype.assignment_copy))
+  local root = {
+    clone = make_clone( spec ),
+    mixin = make_mixin( f_policy ),
+    slot = slot
+  }
+  if spec.use_prototype_delegation and not spec.use_extra_meta then
+    slot( root, "__index", prototype.no_copy )
+  end
   if spec.use_slot_protection then
     slot( root, "mixin", f_policy )
     slot( root, "slot", f_policy )
     if not spec.use_extra_meta then
       slot( root, "__newindex", prototype.no_copy )
     end
-  end
-  if spec.use_prototype_delegation and not spec.use_extra_meta then
-    slot( root, "__index", prototype.no_copy )
-  end
-end
-
-
-local function protect_root( spec, root )
-  if spec.use_slot_protection then
     local meta = (spec.use_extra_meta and {}) or root
     meta.__newindex = protect_slots
     setmetatable( root, meta )
   end
-end
-
-
-local function make_prototype( _, spec )
-  assert( type( spec ) == "table", "invalid prototype specification" )
-  local f_policy, m_policy = default_policies( spec )
-  local root = {
-    clone = make_clone( spec ),
-    mixin = make_mixin( m_policy ),
-    slot = slot
-  }
-  declare_builtin_slots( spec, root, f_policy )
-  protect_root( spec, root )
   return root
 end
 
